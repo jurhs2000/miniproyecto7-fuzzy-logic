@@ -18,6 +18,7 @@ HEIGHT = 800
 FONT = cv2.FONT_HERSHEY_DUPLEX
 SIZE = 0.7
 WHITE = (1, 1, 1)
+GRAY = (0.7, 0.7, 0.7)
 BLACK = (0, 0, 0)
 GREEN = (0, 1, 0)
 RED = (0, 0, 1)
@@ -30,9 +31,9 @@ def drawCamp():
     # dibujar la cancha
     frame = np.ones((HEIGHT, WIDTH, 3))
     frame *= GRASS
-    cv2.rectangle(frame, pt1=(400, 150), pt2=(WIDTH+3, 650), color=WHITE, thickness=5)
-    cv2.rectangle(frame, pt1=GOALPT1, pt2=GOALPT2, color=WHITE, thickness=-1)
-    cv2.circle(frame, center=(400, 400), radius=20, color=WHITE, thickness=-1)
+    cv2.rectangle(frame, pt1=(400, 150), pt2=(WIDTH+3, 650), color=GRAY, thickness=5)
+    cv2.rectangle(frame, pt1=GOALPT1, pt2=GOALPT2, color=GRAY, thickness=-1)
+    cv2.circle(frame, center=(400, 400), radius=20, color=GRAY, thickness=-1)
     return frame
 
 def drawBall(frame, state):
@@ -43,12 +44,36 @@ def drawPlayer(frame, state):
     cv2.rectangle(frame, pt1=(state['player']['x'], state['player']['y']), pt2=(state['player']['x']+20, state['player']['y']+20), color=BLACK, thickness=-1)
     return frame
 
+def drawTextInfo(frame, state):
+    cv2.putText(frame, "Iterations: " + str(state['iterations']), (10, 30), FONT, SIZE, WHITE)
+    if state['player']['reachBall'] == False:
+        cv2.putText(frame, "close: " + str(state['player']['membership']['close']), (10, 60), FONT, SIZE, WHITE)
+        cv2.putText(frame, "medium: " + str(state['player']['membership']['medium']), (10, 90), FONT, SIZE, WHITE)
+        cv2.putText(frame, "far: " + str(state['player']['membership']['far']), (10, 120), FONT, SIZE, WHITE)
+        cv2.line(frame, (10,130), (400, 130), color=WHITE, thickness=1)
+        cv2.putText(frame, "Up: " + str(state['player']['fuzzyOutput']['up']), (10, 150), FONT, SIZE, WHITE)
+        cv2.putText(frame, "Down: " + str(state['player']['fuzzyOutput']['down']), (10, 180), FONT, SIZE, WHITE)
+        cv2.putText(frame, "Left: " + str(state['player']['fuzzyOutput']['left']), (10, 210), FONT, SIZE, WHITE)
+        cv2.putText(frame, "Right: " + str(state['player']['fuzzyOutput']['right']), (10, 240), FONT, SIZE, WHITE)
+    else:
+        cv2.putText(frame, "close: " + str(state['ball']['membershipPower']['close']), (10, 60), FONT, SIZE, WHITE)
+        cv2.putText(frame, "medium: " + str(state['ball']['membershipPower']['medium']), (10, 90), FONT, SIZE, WHITE)
+        cv2.putText(frame, "far: " + str(state['ball']['membershipPower']['far']), (10, 120), FONT, SIZE, WHITE)
+        cv2.line(frame, (10,130), (400, 130), color=WHITE, thickness=1)
+        cv2.putText(frame, "little angle: " + str(state['ball']['membershipAngle']['little']), (10, 150), FONT, SIZE, WHITE)
+        cv2.putText(frame, "medium angle: " + str(state['ball']['membershipAngle']['medium']), (10, 180), FONT, SIZE, WHITE)
+        cv2.putText(frame, "much angle: " + str(state['ball']['membershipAngle']['much']), (10, 210), FONT, SIZE, WHITE)
+        cv2.line(frame, (10,220), (400, 220), color=WHITE, thickness=1)
+        cv2.putText(frame, "Power: " + str(state['ball']['fuzzyOutput']['power']), (10, 240), FONT, SIZE, WHITE)
+        cv2.putText(frame, "Angle: " + str(state['ball']['fuzzyOutput']['angle']), (10, 270), FONT, SIZE, WHITE)
+    return frame
+
 # Función para dibujar el estado de la simulación
 def draw(state):
     frame = drawCamp()
     frame = drawBall(frame, state)
     frame = drawPlayer(frame, state)
-    cv2.putText(frame, "Iterations: " + str(state['iterations']), (10, 30), FONT, SIZE, WHITE)
+    frame = drawTextInfo(frame, state)
     cv2.imshow("Fuzzy Logic", frame)
     cv2.waitKey(1)
 
@@ -227,34 +252,40 @@ def getAngleMembership(angle):
                 break
     return membership
 
-def shotRules(state, distanceMembership, angleMembership):
-    print(distanceMembership, angleMembership)
+def shotRules(state, distanceMembership, angleMembership, angleTriangle):
     fuzzyOutput = {
         "angle": 0,
         "power": 0
     }
-    inputMembership = 0
-    for key in distanceMembership:
-        if distanceMembership[key] > inputMembership:
-            inputMembership = distanceMembership[key]
     for key in FORCEINPUT:
         for input in FORCEINPUT[key]:
-            if input['proximity'] == inputMembership:
-                fuzzyOutput['power'] = (input['membership'] + distanceMembership[inputMembership])/2
-                break
-    angleToGoal = 0
-    if state['ball']['y'] < GOALPT1[1]:
-        angleToGoal = math.atan((state['ball']['x'] - GOALPT1[0])/(state['ball']['y'] - GOALPT1[1]))
-    elif state['ball']['y'] > GOALPT2[1]:
-        angleToGoal = math.atan((state['ball']['x'] - GOALPT2[0])/(state['ball']['y'] - GOALPT2[1]))
-    fuzzyOutput['angle'] = angleToGoal
+            for key2 in distanceMembership:
+                if input['proximity'] == key2:
+                    proximityMembership = input['membership'] * distanceMembership[key2]
+                    if input['proximity'] == 'close':
+                        proximityMembership /= 3
+                    elif input['proximity'] == 'medium':
+                        proximityMembership /= 2
+                    fuzzyOutput['power'] += proximityMembership
+    if angleMembership['little'] > 0:
+        fuzzyOutput['angle'] = 30 * angleMembership['little']
+    if angleMembership['medium'] > 0:
+        fuzzyOutput['angle'] += 60 * angleMembership['medium']
+    if angleMembership['much'] > 0:
+        fuzzyOutput['angle'] += 90 * angleMembership['much']
     return fuzzyOutput
 
-def shot(state, fuzzyOutput):
-    state['ball']['vx'] = fuzzyOutput['power'] * math.cos(fuzzyOutput['angle'])
-    state['ball']['vy'] = fuzzyOutput['power'] * math.sin(fuzzyOutput['angle'])
-    state['ball']['x'] += state['ball']['vx']
-    state['ball']['y'] += state['ball']['vy']
+def moveBall(state):
+    if state['ball']['y'] > HEIGHT/2:
+        # angulo negativo
+        state['ball']['y'] -= state['ball']['fuzzyOutput']['power'] * math.sin(math.radians(state['ball']['fuzzyOutput']['angle']))
+        state['ball']['x'] += state['ball']['fuzzyOutput']['power'] * math.cos(math.radians(state['ball']['fuzzyOutput']['angle']))
+    else:
+        # angulo positivo
+        state['ball']['y'] += state['ball']['fuzzyOutput']['power'] * math.sin(math.radians(state['ball']['fuzzyOutput']['angle']))
+        state['ball']['x'] += state['ball']['fuzzyOutput']['power'] * math.cos(math.radians(state['ball']['fuzzyOutput']['angle']))
+    # reducir potencia
+    state['ball']['fuzzyOutput']['power'] *= 0.999
     return state
 
 def fuzzyLogic(state):
@@ -265,13 +296,16 @@ def fuzzyLogic(state):
             "ball": {
                 "x": random.randint(0, WIDTH),
                 "y": random.randint(0, HEIGHT),
-                "vx": random.randint(0, 0),
-                "vy": random.randint(0, 0)
+                "membershipPower": None,
+                "membershipAngle": None,
+                "fuzzyOutput": None
             },
             "player": {
                 "x": random.randint(0, WIDTH),
                 "y": random.randint(0, HEIGHT),
-                "reachBall": False
+                "reachBall": False,
+                "membership": None,
+                'fuzzyOutput': None
             },
             "iterations": 0
         }
@@ -280,31 +314,37 @@ def fuzzyLogic(state):
     if plotFunctions:
         plotFuzzyFunctions()
     # Move Player to Ball
-    distancePlayerBall = math.sqrt((state['ball']['x'] - state['player']['x'])**2 + (state['ball']['y'] - state['player']['y'])**2)
-    membershipDistancePB = getDistanceMembership(distancePlayerBall)
-    # rules
-    fuzzyOutputPB = movePlayerToBallRules(state, membershipDistancePB)
-    # defuzzification
-    state = movePlayerToBall(state, fuzzyOutputPB)
-    if state['player']['x'] == state['ball']['x'] and state['player']['y'] == state['ball']['y']:
-        state['player']['reachBall'] = True
+    if state['player']['reachBall'] == False:
+        distancePlayerBall = math.sqrt((state['ball']['x'] - state['player']['x'])**2 + (state['ball']['y'] - state['player']['y'])**2)
+        membershipDistancePB = getDistanceMembership(distancePlayerBall)
+        state['player']['membership'] = membershipDistancePB
+        # rules
+        fuzzyOutputPB = movePlayerToBallRules(state, membershipDistancePB)
+        state['player']['fuzzyOutput'] = fuzzyOutputPB
+        # defuzzification
+        state = movePlayerToBall(state, fuzzyOutputPB)
+        if state['player']['x'] == state['ball']['x'] and state['player']['y'] == state['ball']['y']:
+            state['player']['reachBall'] = True
     # shot
     if state['player']['reachBall']:
-        # fuzzification
-        distanceBallGoal = math.sqrt((WIDTH - state['ball']['x'])**2 + (HEIGHT/2 - state['ball']['y'])**2)
-        v1Points = [(state['ball']['x'], state['ball']['y']), (WIDTH, state['ball']['y'])]
-        v2Points = [(state['ball']['x'], state['ball']['y']), (WIDTH, HEIGHT/2)]
-        # points to vectors
-        v1 = np.array(v1Points[1]) - np.array(v1Points[0])
-        v2 = np.array(v2Points[1]) - np.array(v2Points[0])
-        # get angle using points of vectors
-        angleTriangle = math.acos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
-        membershipDistanceBG = getDistanceMembership(distanceBallGoal)
-        membershipAngleBG = getAngleMembership(math.degrees(angleTriangle))
-        # rules
-        fuzzyOutputBG = shotRules(state, membershipDistanceBG, membershipAngleBG)
+        if state['ball']['fuzzyOutput'] == None:
+            # fuzzification
+            distanceBallGoal = math.sqrt((WIDTH - state['ball']['x'])**2 + (HEIGHT/2 - state['ball']['y'])**2)
+            v1Points = [(state['ball']['x'], state['ball']['y']), (WIDTH, state['ball']['y'])]
+            v2Points = [(state['ball']['x'], state['ball']['y']), (WIDTH, HEIGHT/2)]
+            # points to vectors
+            v1 = np.array(v1Points[1]) - np.array(v1Points[0])
+            v2 = np.array(v2Points[1]) - np.array(v2Points[0])
+            # get angle using points of vectors
+            angleTriangle = math.acos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+            membershipDistanceBG = getDistanceMembership(distanceBallGoal)
+            membershipAngleBG = getAngleMembership(math.degrees(angleTriangle))
+            state['ball']['membershipPower'] = membershipDistanceBG
+            state['ball']['membershipAngle'] = membershipAngleBG
+            # rules
+            state['ball']['fuzzyOutput'] = shotRules(state, membershipDistanceBG, membershipAngleBG, math.degrees(angleTriangle))
         # defuzzification
-        state = shot(state, fuzzyOutputBG)
+        state = moveBall(state)
     state['iterations'] += 1
     return state
 
